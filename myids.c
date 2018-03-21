@@ -45,7 +45,13 @@ typedef struct des_port
 	struct des_port *next;
 } des_port;
 src_host *head = NULL;
-
+void ip_format(char *ip_address);
+void print_des(des_host *head);
+void print_src();
+void print_port(des_port *head);
+int insert_port(struct des_port **head, uint16_t port_number);
+void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number);
+void insert_src(uint32_t src_ip, uint32_t des_ip, uint32_t payload, uint16_t port_number);
 void insert_src(uint32_t src_ip, uint32_t des_ip, uint32_t payload, uint16_t port_number)
 {
 
@@ -89,7 +95,7 @@ void insert_src(uint32_t src_ip, uint32_t des_ip, uint32_t payload, uint16_t por
 	return;
 }
 
-void insert_des(struct des_host **head, uint32_t des_ip, uint32_t port_number)
+void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number)
 {
 	des_host *new_node = (des_host *)malloc(sizeof(des_host));
 	new_node->port = (des_port **)malloc(sizeof(des_port));
@@ -127,11 +133,11 @@ void insert_des(struct des_host **head, uint32_t des_ip, uint32_t port_number)
 	return;
 }
 
-int insert_port(struct des_port **head, uint32_t port_number)
+int insert_port(struct des_port **head, uint16_t port_number)
 {
 	if (port_number == (uint16_t)-1)
 	{
-		printf("ICMPP:!\n");
+	
 		return 0;
 	}
 	if (*head == NULL)
@@ -143,18 +149,19 @@ int insert_port(struct des_port **head, uint32_t port_number)
 	}
 	else
 	{
-		des_port *cur_node = head;
+		des_port *cur_node = *head;
 		des_port *pre_node = NULL;
 		while (cur_node != NULL)
-		{
+		{   
 			pre_node = cur_node;
 			if (cur_node->port == port_number)
 			{
-
+              
 				return 0;
 			}
 			cur_node = cur_node->next;
 		}
+		
 		struct des_port *new_node = (des_port *)malloc(sizeof(des_port));
 		new_node->next = NULL;
 		new_node->port = port_number;
@@ -286,12 +293,12 @@ int main(int argc, char **argv)
 	unsigned int frame_count = 0;
 	unsigned int total_ip_count = 0;
 	unsigned int valid_ip_count = 0;
-	unsigned int total_ip_payload = 0;
+	//unsigned int total_ip_payload = 0;
 	unsigned int udp_count = 0;
 	unsigned int icmp_count = 0;
 	unsigned short ip_validation = 0;
-	unsigned char ip_address_sender[16];
-	unsigned char ip_address_receiver[16];
+	char ip_address_sender[16];
+	char ip_address_receiver[16];
 	signal(SIGINT, close_program);
 	if (argc != 6)
 	{
@@ -308,7 +315,7 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	pcap_setnonblock(pcap, 1, errbuf);
+	//pcap_setnonblock(pcap, 1, errbuf);
 	gettimeofday(cur_time, NULL);
 	cur_ts = (double)cur_time->tv_usec / 1000000 + cur_time->tv_sec;
 	printf("Starting capture at: %lf\n", cur_ts);
@@ -359,9 +366,9 @@ int main(int argc, char **argv)
 			dst_ip = ip_hdr->ip_dst.s_addr;
 			pkt_len = ntohs(ip_hdr->ip_len);
 
-			sprintf(ip_address_sender, "%d.%d.%d.%d", src_ip & 0xff, (src_ip >> 8) & 0xff,
+			sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
-			sprintf(ip_address_receiver, "%d.%d.%d.%d", dst_ip & 0xff, (dst_ip >> 8) & 0xff,
+			sprintf(ip_address_receiver, "%u.%u.%u.%u", dst_ip & 0xff, (dst_ip >> 8) & 0xff,
 					(dst_ip >> 16) & 0xff, (dst_ip >> 24) & 0xff);
 
 			ip_format(ip_address_sender);
@@ -395,13 +402,16 @@ int main(int argc, char **argv)
 			{
 				icmp_count++;
 				icmp_hdr = (struct icmphdr *)((u_char *)ip_hdr + (ip_hdr->ip_hl << 2));
-				insert_src(ip_hdr->ip_src.s_addr, ip_hdr->ip_dst.s_addr, pkt_len, -1);
+			//	insert_src(ip_hdr->ip_src.s_addr, ip_hdr->ip_dst.s_addr, pkt_len, -1);
 				printf("%3d |%012lf| %s-->%s |%5d|[ICMP:%4d]|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
 					   pkt_len, icmp_count);
 			}
+
+			
 		}
+	
 	}
 
 	// close files
@@ -412,7 +422,7 @@ int main(int argc, char **argv)
 	printf("TCP packets observed:%d\n", tcp_count);
 	printf("UDP packets observed:%d\n", udp_count);
 	printf("ICMP packets observed:%d\n", icmp_count);
-	print_src();
+		print_src();
 	pcap_close(pcap);
 
 	return 0;
