@@ -31,10 +31,19 @@ typedef struct src_host
 	struct src_host *next;
 } src_host;
 
+typedef struct ids_param
+{
+	uint32_t HH_threshold;
+	uint32_t HS_threshold;
+	uint32_t VS_threshold;
+
+} ids_param;
+
 typedef struct des_host
 {
 	uint32_t des_ip;
 	uint16_t port_count;
+	double VS_ts;
 	struct des_host *next;
 	struct des_port **port;
 
@@ -52,9 +61,9 @@ void print_src();
 void print_port(des_port *head);
 void print_instrusion();
 int insert_port(struct des_port **head, uint16_t port_number);
-void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number);
-void insert_src(struct ip *ip_hdr,  uint32_t payload, uint16_t port_number, double pkt_ts);
-void insert_src(struct ip *ip_hdr,  uint32_t payload, uint16_t port_number, double pkt_ts) //fix hh timestamps
+void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param);
+void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids);
+void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids) //fix hh timestamps
 {
 	uint32_t src_ip = ip_hdr->ip_src.s_addr;
 	uint32_t des_ip = ip_hdr->ip_dst.s_addr;
@@ -64,13 +73,12 @@ void insert_src(struct ip *ip_hdr,  uint32_t payload, uint16_t port_number, doub
 	*(new_node->targets) = NULL;
 	new_node->src_ip = src_ip;
 	new_node->data_sent = payload;
-	new_node->HH_ts = 0;
+	new_node->HH_ts = -1;
 
 	if (head == NULL)
 	{
 
 		head = new_node;
-		
 	}
 	else
 	{
@@ -83,10 +91,10 @@ void insert_src(struct ip *ip_hdr,  uint32_t payload, uint16_t port_number, doub
 			{
 				cur_node->data_sent += payload;
 
-				insert_des(cur_node->targets, des_ip, port_number);
-				if (cur_node->data_sent >= 100)
+				insert_des(cur_node->targets, des_ip, port_number, pkt_ts, ids);
+				if (cur_node->data_sent >= ids.HH_threshold)
 				{
-					if (cur_node->HH_ts == 0)
+					if (cur_node->HH_ts == -1)
 						cur_node->HH_ts = pkt_ts;
 				}
 				return;
@@ -96,22 +104,25 @@ void insert_src(struct ip *ip_hdr,  uint32_t payload, uint16_t port_number, doub
 
 		pre_node->next = new_node;
 	}
-	if (payload >= 100)
+	if (payload >= ids.HH_threshold)
 	{
 
 		new_node->HH_ts = pkt_ts;
 	}
-	insert_des(new_node->targets, des_ip, port_number);
+	insert_des(new_node->targets, des_ip, port_number, pkt_ts, ids);
 	return;
 }
 
-void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number)
+void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param ids)
 {
+	uint32_t VS_threshold = ids.VS_threshold;
 	des_host *new_node = (des_host *)malloc(sizeof(des_host));
 	new_node->port = (des_port **)malloc(sizeof(des_port));
 	new_node->next = NULL;
 	new_node->des_ip = des_ip;
 	new_node->port_count = 0;
+	new_node->VS_ts = -1;
+
 	if (*head == NULL)
 	{
 
@@ -129,6 +140,13 @@ void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number)
 				if (insert_port(cur_node->port, port_number) == 1)
 				{
 					cur_node->port_count++;
+					if (cur_node->port_count >= VS_threshold)
+					{
+						if (cur_node->VS_ts == -1)
+						{
+							cur_node->VS_ts = pkt_ts;
+						}
+					}
 				}
 				return;
 			}
@@ -139,6 +157,10 @@ void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number)
 	if (insert_port(new_node->port, port_number) == 1)
 	{
 		new_node->port_count++;
+		if (new_node->port_count >= VS_threshold)
+		{
+			new_node->VS_ts = pkt_ts;
+		}
 	}
 	return;
 }
@@ -234,25 +256,51 @@ void print_instrusion()
 	printf("Intrusions:\n");
 
 	char ip_address_sender[16];
+	char ip_address_receiver[16];
 	uint32_t src_ip;
+	uint32_t des_ip;
 	uint32_t payload;
 	double pkt_ts;
-	struct src_host *temp = head;
-	while (temp != NULL)
+	double vs_ts;
+	struct src_host *HH_ptr = head;
+	struct des_host *VS_ptr = NULL;
+	while (HH_ptr != NULL)
 	{
-		pkt_ts = temp->HH_ts;
-		if (pkt_ts != 0)
+		VS_ptr = *(HH_ptr->targets);
+		pkt_ts = HH_ptr->HH_ts;
+		if (pkt_ts != -1)
 		{
-			src_ip = temp->src_ip;
+			src_ip = HH_ptr->src_ip;
 
-			payload = temp->data_sent;
+			payload = HH_ptr->data_sent;
 			sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
 			ip_format(ip_address_sender);
 
 			printf("%lf| TYPE: HEAVY HITTER | %s [%d]|\n", pkt_ts, ip_address_sender, payload);
 		}
-		temp = temp->next;
+		while (VS_ptr != NULL)
+		{
+			vs_ts = VS_ptr->VS_ts;
+			if (vs_ts != -1)
+			{
+				src_ip = HH_ptr->src_ip;
+				des_ip = VS_ptr->des_ip;
+
+				payload = VS_ptr->port_count;
+				sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
+						(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
+				ip_format(ip_address_sender);
+				sprintf(ip_address_receiver, "%u.%u.%u.%u", des_ip & 0xff, (des_ip >> 8) & 0xff,
+						(des_ip >> 16) & 0xff, (des_ip >> 24) & 0xff);
+				ip_format(ip_address_receiver);
+
+				printf("%lf| TYPE: VERTICAL SCANNER| %s ->%s [%d]|\n", vs_ts, ip_address_sender, ip_address_receiver, payload);
+			}
+
+			VS_ptr = VS_ptr->next;
+		}
+		HH_ptr = HH_ptr->next;
 	}
 }
 
@@ -321,6 +369,10 @@ int main(int argc, char **argv)
 	struct tcphdr *tcp_hdr = NULL;
 	struct udphdr *udp_hdr = NULL;
 	struct icmphdr *icmp_hdr = NULL;
+	struct ids_param ids;
+	ids.HH_threshold = atoi(argv[2]);
+	ids.HS_threshold = atoi(argv[3]);
+	ids.VS_threshold = atoi(argv[4]);
 
 	unsigned int src_ip;
 	unsigned int dst_ip;
@@ -339,6 +391,7 @@ int main(int argc, char **argv)
 	char ip_address_sender[16];
 	char ip_address_receiver[16];
 	double epoch_tracker;
+
 	signal(SIGINT, close_program);
 	if (argc != 6)
 	{
@@ -437,7 +490,7 @@ int main(int argc, char **argv)
 											(ip_hdr->ip_hl << 2));
 				src_port = ntohs(tcp_hdr->source);
 				dst_port = ntohs(tcp_hdr->dest);
-				insert_src(ip_hdr, pkt_len, dst_port, pkt_ts);
+				insert_src(ip_hdr, pkt_len, dst_port, pkt_ts, ids);
 				printf("%3d |%012lf| %s-->%s |%5d|[TCP :%4d]|%05d->%05d|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
@@ -449,7 +502,7 @@ int main(int argc, char **argv)
 				udp_hdr = (struct udphdr *)((u_char *)ip_hdr + (ip_hdr->ip_hl << 2));
 				src_port = ntohs(udp_hdr->source);
 				dst_port = ntohs(udp_hdr->dest);
-				insert_src(ip_hdr,pkt_len, dst_port, pkt_ts);
+				insert_src(ip_hdr, pkt_len, dst_port, pkt_ts, ids);
 				printf("%3d |%012lf| %s-->%s |%5d|[UDP :%4d]|%05d->%05d|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
@@ -459,7 +512,7 @@ int main(int argc, char **argv)
 			{
 				icmp_count++;
 				icmp_hdr = (struct icmphdr *)((u_char *)ip_hdr + (ip_hdr->ip_hl << 2));
-				insert_src(ip_hdr, pkt_len, -1, pkt_ts);
+				insert_src(ip_hdr, pkt_len, -1, pkt_ts, ids);
 				printf("%3d |%012lf| %s-->%s |%5d|[ICMP:%4d]|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
@@ -468,7 +521,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	// close files
 	printf("---------------Final Statistics---------------\n");
 	printf("Total frames observed:%d\n", frame_count);
 	printf("Total IP packets observed:%d\n", total_ip_count);
