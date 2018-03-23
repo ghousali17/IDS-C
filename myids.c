@@ -49,21 +49,54 @@ typedef struct des_host
 
 } des_host;
 
+typedef struct hs_port
+{
+	uint16_t port_number;
+	struct hs_port *next;
+	uint32_t host_count;
+	double HS_ts;
+	struct hs_src **sources;
+	//
+
+} hs_port;
+
+typedef struct hs_src
+{
+	uint32_t src_ip;
+	struct hs_src *next;
+	uint32_t des_count;
+	struct hs_des **targets;
+	double HS_ts;
+} hs_src;
+
+typedef struct hs_des
+{
+	uint32_t des_ip;
+	struct hs_des *next;
+
+} hs_des;
+
 typedef struct des_port
 {
 	uint16_t port;
 	struct des_port *next;
 } des_port;
 src_host *head = NULL;
+struct hs_port *hs_head = NULL;
 void ip_format(char *ip_address);
 void print_des(des_host *head);
 void print_src();
 void print_port(des_port *head);
 void print_instrusion();
+void hs_insert_src(struct ip *ip_hdr, struct hs_src **head, double pkt_ts, struct ids_param ids);
 int insert_port(struct des_port **head, uint16_t port_number);
 void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param);
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids);
+void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids);
+int hs_insert_des(struct ip *ip_hdr, struct hs_des **head);
+void hs_print_intrusion();
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids) //fix hh timestamps
+
 {
 	uint32_t src_ip = ip_hdr->ip_src.s_addr;
 	uint32_t des_ip = ip_hdr->ip_dst.s_addr;
@@ -250,7 +283,34 @@ void print_port(des_port *head)
 	}
 	printf("\n");
 }
+void hs_print_intrusion()
+{
+	char ip_address_sender[16];
 
+	uint32_t src_ip;
+	uint16_t port_number;
+	double HS_ts;
+	struct hs_port *PORT_ptr = hs_head;
+	struct hs_src *SRC_ptr;
+	while (PORT_ptr != NULL)
+	{
+		port_number = PORT_ptr->port_number;
+		SRC_ptr = *(PORT_ptr->sources);
+		while (SRC_ptr != NULL)
+		{   src_ip = SRC_ptr->src_ip;
+		    sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
+					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
+			ip_format(ip_address_sender);
+			HS_ts = SRC_ptr->HS_ts;
+			if (HS_ts != (double)-1)
+			{
+				printf("%lf| TYPE HORIZONTAL SCAN| Source:%s | Target Port: %u| [%d]\n", HS_ts, ip_address_sender,port_number,SRC_ptr->des_count);
+			}
+			SRC_ptr = SRC_ptr->next;
+		}
+		PORT_ptr = PORT_ptr->next;
+	}
+}
 void print_instrusion()
 {
 	printf("Intrusions:\n");
@@ -277,7 +337,7 @@ void print_instrusion()
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
 			ip_format(ip_address_sender);
 
-			printf("%lf| TYPE: HEAVY HITTER | %s [%d]|\n", pkt_ts, ip_address_sender, payload);
+			printf("%lf| TYPE: HEAVY HITTER | Source:%s | Payload: %d |\n", pkt_ts, ip_address_sender, payload);
 		}
 		while (VS_ptr != NULL)
 		{
@@ -295,7 +355,7 @@ void print_instrusion()
 						(des_ip >> 16) & 0xff, (des_ip >> 24) & 0xff);
 				ip_format(ip_address_receiver);
 
-				printf("%lf| TYPE: VERTICAL SCANNER| %s ->%s [%d]|\n", vs_ts, ip_address_sender, ip_address_receiver, payload);
+				printf("%lf| TYPE: VERTICAL SCANNER| Source: %s | Destination: %s |\n", vs_ts, ip_address_sender, ip_address_receiver);
 			}
 
 			VS_ptr = VS_ptr->next;
@@ -304,6 +364,118 @@ void print_instrusion()
 	}
 }
 
+void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids)
+{
+	struct hs_port *new_node = (struct hs_port *)malloc(sizeof(struct hs_port));
+	new_node->port_number = port_number;
+	new_node->host_count = 0;
+	new_node->next = NULL;
+	new_node->HS_ts = pkt_ts;
+	new_node->sources = (struct hs_src **)malloc(sizeof(struct hs_src *));
+	if (hs_head == NULL)
+	{
+		hs_head = new_node;
+	}
+	else
+	{
+		struct hs_port *cur_node = hs_head;
+		struct hs_port *pre_node = NULL;
+		while (cur_node != NULL)
+		{
+			pre_node = cur_node;
+			if (cur_node->port_number == port_number)
+			{
+				hs_insert_src(ip_hdr, cur_node->sources, pkt_ts, ids);
+				return;
+			}
+			cur_node = cur_node->next;
+		}
+		pre_node->next = new_node;
+	}
+	hs_insert_src(ip_hdr, new_node->sources, pkt_ts, ids);
+}
+
+void hs_insert_src(struct ip *ip_hdr, struct hs_src **head, double pkt_ts, struct ids_param ids)
+{
+	uint32_t src_ip = ip_hdr->ip_src.s_addr;
+	struct hs_src *new_node = (struct hs_src *)malloc(sizeof(struct hs_src));
+	new_node->next = NULL;
+	new_node->src_ip = src_ip;
+	new_node->des_count = 0;
+	new_node->targets = (struct hs_des **)malloc(sizeof(struct hs_des *));
+	new_node->HS_ts = (double) -1;
+
+	if (*head == NULL)
+	{
+
+		*head = new_node;
+	}
+	else
+	{
+		struct hs_src *cur_node = *head;
+		struct hs_src *pre_node = NULL;
+		while (cur_node != NULL)
+		{
+			pre_node = cur_node;
+			if (cur_node->src_ip == src_ip)
+			{
+				if (hs_insert_des(ip_hdr, cur_node->targets) == 1)
+				{
+					cur_node->des_count++;
+					if (cur_node->des_count >= ids.HS_threshold)
+					{
+						if (cur_node->HS_ts == -1)
+						{
+							cur_node->HS_ts = pkt_ts;
+						}
+					}
+				}
+
+				return;
+			}
+
+			cur_node = cur_node->next;
+		}
+		pre_node->next = new_node;
+	}
+	new_node->des_count++;
+	hs_insert_des(ip_hdr, new_node->targets);
+	if (new_node->des_count >= ids.HS_threshold)
+	{
+		new_node->HS_ts = pkt_ts;
+	}
+}
+int hs_insert_des(struct ip *ip_hdr, struct hs_des **head)
+{
+
+	uint32_t des_ip = ip_hdr->ip_dst.s_addr;
+	struct hs_des *new_node = (struct hs_des *)malloc(sizeof(hs_des));
+	new_node->next = NULL;
+	new_node->des_ip = des_ip;
+
+	if (*head == NULL)
+	{
+
+		*head = new_node;
+	}
+	else
+	{
+		struct hs_des *cur_node = *head;
+		struct hs_des *pre_node = NULL;
+		while (cur_node != NULL)
+		{
+			pre_node = cur_node;
+			if (cur_node->des_ip == des_ip)
+			{
+
+				return 0;
+			}
+			cur_node = cur_node->next;
+		}
+		pre_node->next = new_node;
+	}
+	return 1;
+}
 int close_p;
 void close_program(int signal)
 {
@@ -349,6 +521,46 @@ void ip_format(char *ip_address)
 	return;
 }
 
+void print_target_port()
+{
+	printf("Distinct ports targeted:\n");
+	struct hs_port *PORT_ptr = hs_head;
+	struct hs_src *SRC_ptr = NULL;
+	struct hs_des *DES_ptr = NULL;
+	char ip_address_sender[16];
+	char ip_address_receiver[16];
+	uint32_t src_ip;
+	uint32_t des_ip;
+
+	while (PORT_ptr != NULL)
+	{
+		printf("%u\n", PORT_ptr->port_number);
+
+		SRC_ptr = *PORT_ptr->sources;
+		while (SRC_ptr != NULL)
+		{
+			src_ip = SRC_ptr->src_ip;
+			sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
+					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
+			ip_format(ip_address_sender);
+			printf("%s [%d]\n", ip_address_sender, SRC_ptr->des_count);
+			DES_ptr = *SRC_ptr->targets;
+			printf("host:\n");
+			while (DES_ptr != NULL)
+			{
+				des_ip = DES_ptr->des_ip;
+				sprintf(ip_address_receiver, "%u.%u.%u.%u", des_ip & 0xff, (des_ip >> 8) & 0xff,
+						(des_ip >> 16) & 0xff, (des_ip >> 24) & 0xff);
+				ip_format(ip_address_receiver);
+				printf("%s ", ip_address_receiver);
+				DES_ptr = DES_ptr->next;
+			}
+			SRC_ptr = SRC_ptr->next;
+		}
+		printf("\n\n");
+		PORT_ptr = PORT_ptr->next;
+	}
+}
 /***************************************************************************
  * Main program
  ***************************************************************************/
@@ -431,7 +643,9 @@ int main(int argc, char **argv)
 			{
 				printf("Epoch summary list at %lf\n", pkt_ts);
 				print_src();
+				print_target_port();
 				print_instrusion();
+				hs_print_intrusion();
 				printf("\n");
 				head = NULL;
 				//  printf("Called print!\n");
@@ -491,6 +705,7 @@ int main(int argc, char **argv)
 				src_port = ntohs(tcp_hdr->source);
 				dst_port = ntohs(tcp_hdr->dest);
 				insert_src(ip_hdr, pkt_len, dst_port, pkt_ts, ids);
+				hs_insert_port(ip_hdr, dst_port, pkt_ts, ids);
 				printf("%3d |%012lf| %s-->%s |%5d|[TCP :%4d]|%05d->%05d|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
@@ -503,6 +718,7 @@ int main(int argc, char **argv)
 				src_port = ntohs(udp_hdr->source);
 				dst_port = ntohs(udp_hdr->dest);
 				insert_src(ip_hdr, pkt_len, dst_port, pkt_ts, ids);
+				hs_insert_port(ip_hdr, dst_port, pkt_ts, ids);
 				printf("%3d |%012lf| %s-->%s |%5d|[UDP :%4d]|%05d->%05d|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
