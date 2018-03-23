@@ -23,38 +23,35 @@
 typedef struct src_host
 {
 	uint32_t src_ip;
-	uint32_t data_sent;
-	struct des_host **targets;
-	double HH_ts;
-	//port
-
+	uint32_t data_sent; //TOTAL IP PAYLOAD
+	double HH_ts;     //TIME STAMP FOR HEAVY HITTER INTRUSION DETECTION 
+	struct des_host **targets; //LIST OF DESTINATION HOST [NEEDED FOR VERTICAL PORT SCAN DETECTION]
 	struct src_host *next;
 } src_host;
 
 typedef struct ids_param
 {
-	uint32_t HH_threshold;
-	uint32_t HS_threshold;
-	uint32_t VS_threshold;
+	uint32_t HH_threshold; // HEAVY HITTER THRESHOLD
+	uint32_t HS_threshold; // HORINTAL PORT SCAN THRESHOLD
+	uint32_t VS_threshold; // VERTICAL PORT SCAN THRESHOLD
 
 } ids_param;
 
 typedef struct des_host
 {
 	uint32_t des_ip;
-	uint16_t port_count;
-	double VS_ts;
-	struct des_host *next;
-	struct des_port **port;
+	uint16_t port_count;   //PORTS OF THE HOST MACHINE TARGETED BY A SPECIFIC IP
+	double VS_ts;          // TIME STAMP FOR VERTICAL PORT SCAN DETECTION
+	struct des_host *next; 
+	struct des_port **port; //LIST OF PORTS OF THE SPECIFIC HOST TARGETED BY SPECIFIC SOURCE
 
 } des_host;
 
 typedef struct hs_port
 {
 	uint16_t port_number;
-	struct hs_port *next;
+	struct hs_port *next; 
 	uint32_t host_count;
-	double HS_ts;
 	struct hs_src **sources;
 	//
 
@@ -81,22 +78,27 @@ typedef struct des_port
 	uint16_t port;
 	struct des_port *next;
 } des_port;
+
+
 src_host *head = NULL;
-struct hs_port *hs_head = NULL;
+struct hs_port *HEAD_LIST_TWO = NULL;
 void ip_format(char *ip_address);
 void print_des(des_host *head);
-void print_src();
+void print_list_one();
 void print_port(des_port *head);
-void print_instrusion();
+void detect_HH_VS();
 void hs_insert_src(struct ip *ip_hdr, struct hs_src **head, double pkt_ts, struct ids_param ids);
 int insert_port(struct des_port **head, uint16_t port_number);
 void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param);
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids);
 void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids);
 int hs_insert_des(struct ip *ip_hdr, struct hs_des **head);
-void hs_print_intrusion();
-void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids) //fix hh timestamps
+void detect_HS();
 
+
+
+/****************************************************FUNCTION INSERTION IN LIST ONE [HH and VS]***********************************************************/
+void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids) 
 {
 	uint32_t src_ip = ip_hdr->ip_src.s_addr;
 	uint32_t des_ip = ip_hdr->ip_dst.s_addr;
@@ -154,7 +156,7 @@ void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, d
 	new_node->next = NULL;
 	new_node->des_ip = des_ip;
 	new_node->port_count = 0;
-	new_node->VS_ts = -1;
+	new_node->VS_ts = -1;  // -1 to indicate the absence of ports [ICMP MESSAGES]
 
 	if (*head == NULL)
 	{
@@ -234,8 +236,9 @@ int insert_port(struct des_port **head, uint16_t port_number)
 	}
 	return 1;
 }
-
-void print_src()
+/**************************************************************************************************************************************/
+/***************************************************FUNCTIONS TO PRINT LIST FOR HH AND VS**********************************************/
+void print_list_one()
 {
 	int count = 1;
 	char ip_address_sender[16];
@@ -283,35 +286,40 @@ void print_port(des_port *head)
 	}
 	printf("\n");
 }
-void hs_print_intrusion()
+
+/*****************************************************INTRUSION DETECTION FUNCTIONS**********************************************************/
+
+
+void detect_HS()
 {
 	char ip_address_sender[16];
 
 	uint32_t src_ip;
 	uint16_t port_number;
 	double HS_ts;
-	struct hs_port *PORT_ptr = hs_head;
+	struct hs_port *PORT_ptr = HEAD_LIST_TWO;
 	struct hs_src *SRC_ptr;
 	while (PORT_ptr != NULL)
 	{
 		port_number = PORT_ptr->port_number;
 		SRC_ptr = *(PORT_ptr->sources);
 		while (SRC_ptr != NULL)
-		{   src_ip = SRC_ptr->src_ip;
-		    sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
+		{
+			src_ip = SRC_ptr->src_ip;
+			sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
 			ip_format(ip_address_sender);
 			HS_ts = SRC_ptr->HS_ts;
 			if (HS_ts != (double)-1)
 			{
-				printf("%lf| TYPE HORIZONTAL SCAN| Source:%s | Target Port: %u| [%d]\n", HS_ts, ip_address_sender,port_number,SRC_ptr->des_count);
+				printf("%lf| TYPE HORIZONTAL SCAN| Source:%s | Target Port: %u| [%d]\n", HS_ts, ip_address_sender, port_number, SRC_ptr->des_count);
 			}
 			SRC_ptr = SRC_ptr->next;
 		}
 		PORT_ptr = PORT_ptr->next;
 	}
 }
-void print_instrusion()
+void detect_HH_VS()
 {
 	printf("Intrusions:\n");
 
@@ -363,22 +371,23 @@ void print_instrusion()
 		HH_ptr = HH_ptr->next;
 	}
 }
-
+/***********************************************************************************************************************************************/
+/************************************************FUNCTIONS FOR INSERTION IN LIST TWO [HORIZONTAL SCAN]********************************************************/
 void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids)
 {
 	struct hs_port *new_node = (struct hs_port *)malloc(sizeof(struct hs_port));
 	new_node->port_number = port_number;
 	new_node->host_count = 0;
 	new_node->next = NULL;
-	new_node->HS_ts = pkt_ts;
+	
 	new_node->sources = (struct hs_src **)malloc(sizeof(struct hs_src *));
-	if (hs_head == NULL)
+	if (HEAD_LIST_TWO == NULL)
 	{
-		hs_head = new_node;
+		HEAD_LIST_TWO = new_node;
 	}
 	else
 	{
-		struct hs_port *cur_node = hs_head;
+		struct hs_port *cur_node = HEAD_LIST_TWO;
 		struct hs_port *pre_node = NULL;
 		while (cur_node != NULL)
 		{
@@ -403,7 +412,7 @@ void hs_insert_src(struct ip *ip_hdr, struct hs_src **head, double pkt_ts, struc
 	new_node->src_ip = src_ip;
 	new_node->des_count = 0;
 	new_node->targets = (struct hs_des **)malloc(sizeof(struct hs_des *));
-	new_node->HS_ts = (double) -1;
+	new_node->HS_ts = (double)-1;
 
 	if (*head == NULL)
 	{
@@ -476,6 +485,8 @@ int hs_insert_des(struct ip *ip_hdr, struct hs_des **head)
 	}
 	return 1;
 }
+
+/*************************************************************************************************************************************************/
 int close_p;
 void close_program(int signal)
 {
@@ -521,10 +532,10 @@ void ip_format(char *ip_address)
 	return;
 }
 
-void print_target_port()
+void print_list_two()
 {
 	printf("Distinct ports targeted:\n");
-	struct hs_port *PORT_ptr = hs_head;
+	struct hs_port *PORT_ptr = HEAD_LIST_TWO;
 	struct hs_src *SRC_ptr = NULL;
 	struct hs_des *DES_ptr = NULL;
 	char ip_address_sender[16];
@@ -642,10 +653,10 @@ int main(int argc, char **argv)
 			if (pkt_ts > epoch_tracker)
 			{
 				printf("Epoch summary list at %lf\n", pkt_ts);
-				print_src();
-				print_target_port();
-				print_instrusion();
-				hs_print_intrusion();
+				print_list_one();
+				print_list_two();
+				detect_HH_VS();
+				detect_HS();
 				printf("\n");
 				head = NULL;
 				//  printf("Called print!\n");
