@@ -79,22 +79,24 @@ typedef struct des_port
 	struct des_port *next;
 } des_port;
 
-src_host *head = NULL;
-struct hs_port *HEAD_LIST_TWO = NULL;
+struct src_host *HEAD_LIST_ONE = NULL; //list of lists for tracking HH and VS
+struct hs_port *HEAD_LIST_TWO = NULL;  // list of lists for tracking HS
+
 void ip_format(char *ip_address);
 void print_des(des_host *head);
 void print_list_one();
 void print_port(des_port *head);
-void detect_HH_VS();
+void report_HH_VS();
 void hs_insert_src(struct ip *ip_hdr, struct hs_src **head, double pkt_ts, struct ids_param ids);
 int insert_port(struct des_port **head, uint16_t port_number);
 void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param);
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids);
 void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids);
 int hs_insert_des(struct ip *ip_hdr, struct hs_des **head);
-void detect_HS();
+void report_HS();
 
 /****************************************************FUNCTION INSERTION IN LIST ONE [HH and VS]***********************************************************/
+//Inserts the Source IP (level 1) in List one
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids)
 {
 	uint32_t src_ip = ip_hdr->ip_src.s_addr;
@@ -107,15 +109,15 @@ void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, doubl
 	new_node->data_sent = payload;
 	new_node->HH_ts = -1;
 
-	if (head == NULL)
+	if (HEAD_LIST_ONE == NULL)
 	{
 
-		head = new_node;
+		HEAD_LIST_ONE = new_node;
 	}
 	else
 	{
 		src_host *pre_node = NULL;
-		src_host *cur_node = head;
+		src_host *cur_node = HEAD_LIST_ONE;
 		while (cur_node != NULL)
 		{
 			pre_node = cur_node;
@@ -145,6 +147,7 @@ void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, doubl
 	return;
 }
 
+//Inserts Destination IP (Level 2) in List One
 void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, double pkt_ts, struct ids_param ids)
 {
 	uint32_t VS_threshold = ids.VS_threshold;
@@ -197,9 +200,10 @@ void insert_des(struct des_host **head, uint32_t des_ip, uint16_t port_number, d
 	return;
 }
 
+//Inserts Port number (Level 3) in List One
 int insert_port(struct des_port **head, uint16_t port_number)
 {
-	if (port_number == (uint16_t)-1)
+	if (port_number == (uint16_t)-1) // -1 indicates that packets is ICMP
 	{
 
 		return 0;
@@ -239,7 +243,7 @@ void print_list_one()
 {
 	int count = 1;
 	char ip_address_sender[16];
-	src_host *temp = head;
+	src_host *temp = HEAD_LIST_ONE;
 	uint32_t src_ip;
 	while (temp != NULL)
 	{
@@ -286,7 +290,8 @@ void print_port(des_port *head)
 
 /*****************************************************INTRUSION DETECTION FUNCTIONS**********************************************************/
 
-void detect_HS()
+
+void report_HS()
 {
 	char ip_address_sender[16];
 
@@ -306,16 +311,16 @@ void detect_HS()
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
 			ip_format(ip_address_sender);
 			HS_ts = SRC_ptr->HS_ts;
-			if (HS_ts != (double)-1)
+			if (HS_ts != (double)-1) // -1 is initialk value of TS so if TS = -1 means no intrusion detected while inserting
 			{
-				printf("%lf| TYPE HORIZONTAL SCAN| Source:%s | Target Port: %u| [%d]\n", HS_ts, ip_address_sender, port_number, SRC_ptr->des_count);
+				printf("%012lf| TYPE HORIZONTAL SCAN| Source:%s | Target Port: %u| [%d]\n", HS_ts, ip_address_sender, port_number, SRC_ptr->des_count);
 			}
 			SRC_ptr = SRC_ptr->next;
 		}
 		PORT_ptr = PORT_ptr->next;
 	}
 }
-void detect_HH_VS()
+void report_HH_VS()
 {
 	printf("Intrusions:\n");
 
@@ -326,7 +331,7 @@ void detect_HH_VS()
 	uint32_t payload;
 	double pkt_ts;
 	double vs_ts;
-	struct src_host *HH_ptr = head;
+	struct src_host *HH_ptr = HEAD_LIST_ONE;
 	struct des_host *VS_ptr = NULL;
 	while (HH_ptr != NULL)
 	{
@@ -341,7 +346,7 @@ void detect_HH_VS()
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
 			ip_format(ip_address_sender);
 
-			printf("%lf| TYPE: HEAVY HITTER | Source:%s | Payload: %d |\n", pkt_ts, ip_address_sender, payload);
+			printf("%012lf| TYPE: HEAVY HITTER | Source:%s | Payload: %d |\n", pkt_ts, ip_address_sender, payload);
 		}
 		while (VS_ptr != NULL)
 		{
@@ -359,7 +364,7 @@ void detect_HH_VS()
 						(des_ip >> 16) & 0xff, (des_ip >> 24) & 0xff);
 				ip_format(ip_address_receiver);
 
-				printf("%lf| TYPE: VERTICAL SCANNER| Source: %s | Destination: %s |\n", vs_ts, ip_address_sender, ip_address_receiver);
+				printf("%012lf| TYPE: VERTICAL SCANNER| Source: %s | Destination: %s |\n", vs_ts, ip_address_sender, ip_address_receiver);
 			}
 
 			VS_ptr = VS_ptr->next;
@@ -514,7 +519,7 @@ unsigned short cksum(struct ip *ip, int len)
 	return ~sum;
 }
 
-void ip_format(char *ip_address)
+void ip_format(char *ip_address) //converts ip string into a formatted ip string
 {
 	int len = strlen(ip_address);
 	int padding = 15 - len;
@@ -564,7 +569,7 @@ void print_list_two()
 			}
 			SRC_ptr = SRC_ptr->next;
 		}
-		printf("\n\n");
+		printf("\n");
 		PORT_ptr = PORT_ptr->next;
 	}
 }
@@ -614,49 +619,54 @@ int main(int argc, char **argv)
 	signal(SIGINT, close_program);
 	if (argc != 6)
 	{
-		fprintf(stderr, "Usage: %s <interface> <hh_threshold> ><h_pscan_thresh> <v_pscan_thresh> <epoch>\n", argv[0]);
+		fprintf(stderr, "Usage: %s <trace_file_name> <hh_threshold> ><h_pscan_thresh> <v_pscan_thresh> <epoch>\n", argv[0]);
 		exit(-1);
 	}
 	epoch = atoi(argv[5]) * 1000;
 	printf("Setting epoch to %d\n", epoch);
 
 	// open input pcap file
-	if ((pcap = pcap_open_live(argv[1], 1500, 1, epoch, errbuf)) == NULL)
+	if ((pcap = pcap_open_offline_with_tstamp_precision(argv[1],
+														PCAP_TSTAMP_PRECISION_MICRO, errbuf)) == NULL)
+	//	if ((pcap = pcap_open_live(argv[1], 1500, 1, epoch, errbuf)) == NULL)
 	{
 		fprintf(stderr, "ERR: cannot open %s (%s)\n", argv[1], errbuf);
 		exit(-1);
 	}
 
-	//pcap_setnonblock(pcap, 1, errbuf);
+	pcap_setnonblock(pcap, 1, errbuf);
 	gettimeofday(cur_time, NULL);
 	cur_ts = -1; //(double)cur_time->tv_usec / 1000000 + cur_time->tv_sec;
 	epoch_tracker = epoch / 1000;
 	printf("Starting capture at: %lf\n", cur_ts);
-	while (close_p == 0)
+	//	while (close_p == 0)
 	{
 		ip_hdr = NULL; //re initialises IP header after every packet analysis.
 
-		if ((pkt = pcap_next(pcap, &hdr)) != NULL)
+		while ((pkt = pcap_next(pcap, &hdr)) != NULL)
 		{
 			if (cur_ts == -1)
 			{
-				printf("Got first packet!\n");
+
 				cur_ts = (double)hdr.ts.tv_usec / 1000000 + hdr.ts.tv_sec;
-				printf("Starting capture at: %lf\n", cur_ts);
 			}
 			// get the timestamp
 			pkt_ts = (double)hdr.ts.tv_usec / 1000000 + hdr.ts.tv_sec - cur_ts;
 			if (pkt_ts > epoch_tracker)
 			{
-				printf("Epoch summary list at %lf\n", pkt_ts);
-				print_list_one();
-				print_list_two();
-				detect_HH_VS();
-				detect_HS();
-				printf("\n");
-				head = NULL;
-				//  printf("Called print!\n");
-				epoch_tracker += epoch / 1000;
+				while (pkt_ts > (epoch_tracker))
+				{
+					printf("Epoch summary list at %lf\n", pkt_ts);
+					print_list_one();
+					print_list_two();
+					report_HH_VS();
+					report_HS();
+					printf("\n");
+					HEAD_LIST_ONE = NULL;
+					HEAD_LIST_TWO = NULL;
+					//  printf("Called print!\n");
+					epoch_tracker += epoch / 1000;
+				}
 			}
 			frame_count++;
 			// parse the headers
@@ -743,7 +753,15 @@ int main(int argc, char **argv)
 			}
 		}
 	}
-
+	//intrusion in the last epoch
+	print_list_one();
+	print_list_two();
+	report_HH_VS();
+	report_HS();
+	printf("\n");
+	HEAD_LIST_ONE = NULL;
+	HEAD_LIST_TWO = NULL;
+	//final summary
 	printf("---------------Final Statistics---------------\n");
 	printf("Total frames observed:%d\n", frame_count);
 	printf("Total IP packets observed:%d\n", total_ip_count);
