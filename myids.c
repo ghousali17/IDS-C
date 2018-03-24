@@ -94,7 +94,7 @@ void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, doubl
 void hs_insert_port(struct ip *ip_hdr, uint32_t port_number, double pkt_ts, struct ids_param ids);
 int hs_insert_des(struct ip *ip_hdr, struct hs_des **head);
 void report_HS();
-
+void cleanup();
 /****************************************************FUNCTION INSERTION IN LIST ONE [HH and VS]***********************************************************/
 //Inserts the Source IP (level 1) in List one
 void insert_src(struct ip *ip_hdr, uint32_t payload, uint16_t port_number, double pkt_ts, struct ids_param ids)
@@ -289,7 +289,6 @@ void print_port(des_port *head)
 }
 
 /*****************************************************INTRUSION DETECTION FUNCTIONS**********************************************************/
-
 
 void report_HS()
 {
@@ -573,6 +572,37 @@ void print_list_two()
 		PORT_ptr = PORT_ptr->next;
 	}
 }
+
+void cleanup()
+{
+	struct src_host *level_1 = HEAD_LIST_ONE;
+	HEAD_LIST_ONE = NULL;
+	struct src_host *level_1_temp = NULL;
+	struct des_host *level_2 = NULL;
+	struct des_host *level_2_temp = NULL;
+	struct des_port *level_3 = NULL; 
+
+	while (level_1 != NULL)
+	{
+		printf("Free Level 1!\n");
+		level_1_temp = level_1;
+
+
+		level_2 = *(level_1_temp->targets);
+		while(level_2 != NULL)
+		{
+			printf("Free Level 2!\n");
+			level_2_temp = level_2;
+
+
+		    level_2 = level_2->next;
+			free(level_2_temp);
+		}
+
+		level_1 = level_1->next;
+		free(level_1_temp);
+	}
+}
 /***************************************************************************
  * Main program
  ***************************************************************************/
@@ -662,7 +692,8 @@ int main(int argc, char **argv)
 					report_HH_VS();
 					report_HS();
 					printf("\n");
-					HEAD_LIST_ONE = NULL;
+					cleanup();
+					//HEAD_LIST_ONE = NULL;
 					HEAD_LIST_TWO = NULL;
 					//  printf("Called print!\n");
 					epoch_tracker += epoch / 1000;
@@ -759,6 +790,7 @@ int main(int argc, char **argv)
 	report_HH_VS();
 	report_HS();
 	printf("\n");
+	cleanup();
 	HEAD_LIST_ONE = NULL;
 	HEAD_LIST_TWO = NULL;
 	//final summary
