@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <time.h>
@@ -20,6 +21,14 @@
 
 #define ETH_HDR_LEN 14
 
+typedef struct ids_param
+{
+	unsigned long HH_threshold; // HEAVY HITTER THRESHOLD
+	uint32_t HS_threshold; // HORINTAL PORT SCAN THRESHOLD
+	uint32_t VS_threshold; // VERTICAL PORT SCAN THRESHOLD
+
+} ids_param;
+
 typedef struct src_host
 {
 	uint32_t src_ip;
@@ -29,41 +38,39 @@ typedef struct src_host
 	struct src_host *next;
 } src_host;
 
-typedef struct ids_param
-{
-	uint32_t HH_threshold; // HEAVY HITTER THRESHOLD
-	uint32_t HS_threshold; // HORINTAL PORT SCAN THRESHOLD
-	uint32_t VS_threshold; // VERTICAL PORT SCAN THRESHOLD
-
-} ids_param;
 
 typedef struct des_host
 {
 	uint32_t des_ip;
 	uint16_t port_count; //PORTS OF THE HOST MACHINE TARGETED BY A SPECIFIC IP
 	double VS_ts;		 // TIME STAMP FOR VERTICAL PORT SCAN DETECTION
-	struct des_host *next;
 	struct des_port **port; //LIST OF PORTS OF THE SPECIFIC HOST TARGETED BY SPECIFIC SOURCE
+	struct des_host *next;
 
 } des_host;
+
+typedef struct des_port
+{
+	uint16_t port;
+	struct des_port *next;
+} des_port;
 
 typedef struct hs_port
 {
 	uint16_t port_number;
-	struct hs_port *next;
 	uint32_t host_count;
 	struct hs_src **sources;
-	//
+	struct hs_port *next;
 
 } hs_port;
 
 typedef struct hs_src
 {
 	uint32_t src_ip;
-	struct hs_src *next;
 	uint32_t des_count;
 	struct hs_des **targets;
 	double HS_ts;
+	struct hs_src *next;
 } hs_src;
 
 typedef struct hs_des
@@ -73,11 +80,6 @@ typedef struct hs_des
 
 } hs_des;
 
-typedef struct des_port
-{
-	uint16_t port;
-	struct des_port *next;
-} des_port;
 
 struct src_host *HEAD_LIST_ONE = NULL; //list of lists for tracking HH and VS
 struct hs_port *HEAD_LIST_TWO = NULL;  // list of lists for tracking HS
@@ -494,9 +496,44 @@ void close_program(int signal)
 	close_p = 1;
 }
 
+unsigned short in_cksum(unsigned short* addr, int len)	// Interent checksum
+{
+	int nleft = len, sum = 0;
+	unsigned short *w = addr, answer = 0;
+
+	while (nleft > 1)
+	{
+		sum += *w++;
+		nleft -= 2;
+	}
+
+	if (nleft == 1)
+	{
+		*(unsigned char*) &answer = *(u_char*) w;
+		sum += answer;
+    }
+
+	sum = (sum >> 16) + (sum & 0xffff);
+	sum += sum >> 16;
+	return ~sum;
+}
+
+unsigned short ip_checksum(unsigned char *iphdr)
+{
+	char buf[20];	// IP header size
+	struct iphdr *iph;
+	memcpy(buf, iphdr, sizeof(buf));
+	iph = (struct iphdr *) buf;
+	iph->check = 0;
+
+	return in_cksum((unsigned short *)buf, sizeof(buf));
+}
+
+
+/*
 unsigned short cksum(struct ip *ip, int len)
 {
-	long sum = 0; /* assume 32 bit long, 16 bit short */
+	long sum = 0; // assume 32 bit long, 16 bit short //
 
 	u_short *ptr = ip; //ptr to ip packet (16 bit increment)
 	while (len > 1)
@@ -504,19 +541,19 @@ unsigned short cksum(struct ip *ip, int len)
 		sum += *ptr;
 		*ptr++;
 
-		if (sum & 0x80000000)					/* if high order bit set, fold */
+		if (sum & 0x80000000)					// if high order bit set, fold //
 			sum = (sum & 0xFFFF) + (sum >> 16); //16bit hexadecimal addition
 		len -= 2;
 	}
 
-	if (len) /* take care of left over byte */
+	if (len) // take care of left over byte //
 		sum += (unsigned short)*(unsigned char *)ip;
 
 	while (sum >> 16)
 		sum = (sum & 0xFFFF) + (sum >> 16);
 
 	return ~sum;
-}
+}*/
 
 void ip_format(char *ip_address) //converts ip string into a formatted ip string
 {
@@ -580,7 +617,7 @@ void cleanup()
 	struct src_host *level_1_temp = NULL;
 	struct des_host *level_2 = NULL;
 	struct des_host *level_2_temp = NULL;
-	struct des_port *level_3 = NULL; 
+	//struct des_port *level_3 = NULL; 
 
 	while (level_1 != NULL)
 	{
@@ -624,9 +661,6 @@ int main(int argc, char **argv)
 	struct udphdr *udp_hdr = NULL;
 	struct icmphdr *icmp_hdr = NULL;
 	struct ids_param ids;
-	ids.HH_threshold = atoi(argv[2]);
-	ids.HS_threshold = atoi(argv[3]);
-	ids.VS_threshold = atoi(argv[4]);
 
 	unsigned int src_ip;
 	unsigned int dst_ip;
@@ -638,7 +672,7 @@ int main(int argc, char **argv)
 	unsigned int frame_count = 0;
 	unsigned int total_ip_count = 0;
 	unsigned int valid_ip_count = 0;
-	//unsigned int total_ip_payload = 0;
+	unsigned long total_ip_payload = 0;
 	unsigned int udp_count = 0;
 	unsigned int icmp_count = 0;
 	unsigned short ip_validation = 0;
@@ -652,7 +686,16 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Usage: %s <trace_file_name> <hh_threshold> ><h_pscan_thresh> <v_pscan_thresh> <epoch>\n", argv[0]);
 		exit(-1);
 	}
+	if (atoi(argv[2]) < 0 && atoi(argv[3]) < 0 && atoi(argv[4]) < 0 && atoi(argv[5]) < 0) {
+		fprintf(stderr, "Usage: %s <trace_file_name> <hh_threshold> ><h_pscan_thresh> <v_pscan_thresh> <epoch>\n", argv[0]);
+		exit(-1);	
+	}
+	ids.HH_threshold = atoi(argv[2]) * pow(10,6);
+	ids.HS_threshold = atoi(argv[3]);
+	ids.VS_threshold = atoi(argv[4]);
 	epoch = atoi(argv[5]) * 1000;
+
+
 	printf("Setting epoch to %d\n", epoch);
 
 	// open input pcap file
@@ -705,12 +748,12 @@ int main(int argc, char **argv)
 			eth_hdr = (struct ether_header *)pkt;
 			switch (ntohs(eth_hdr->ether_type))
 			{
-			case ETH_P_IP: // IP packets (no VLAN header)
-				ip_hdr = (struct ip *)(pkt + ETH_HDR_LEN);
-				break;
-			case 0x8100: // with VLAN header (with 4 bytes)
-				ip_hdr = (struct ip *)(pkt + ETH_HDR_LEN + 4);
-				break;
+				case ETH_P_IP: // IP packets (no VLAN header)
+					ip_hdr = (struct ip *)(pkt + ETH_HDR_LEN);
+					break;
+				case 0x8100: // with VLAN header (with 4 bytes)
+					ip_hdr = (struct ip *)(pkt + ETH_HDR_LEN + 4);
+					break;
 			}
 
 			// if IP header is NULL (not IP or VLAN), continue.
@@ -720,15 +763,16 @@ int main(int argc, char **argv)
 			}
 			total_ip_count++; //total ip count increased.
 
-			ip_validation = (unsigned short)cksum(ip_hdr, (u_char)(ip_hdr->ip_hl) * 4);
+			ip_validation = htons((unsigned short) ip_checksum((unsigned char *)ip_hdr));
+			printf(" IP checksum = %x\t%x\n", htons((unsigned short) ip_hdr->ip_sum), ip_validation);
 
-			if (ip_validation == (unsigned short)0)
+			if (htons(ip_hdr->ip_sum) == ip_validation)
 			{
-
 				valid_ip_count++;
 			}
 			else
 			{
+				fprintf(stderr, "IP checksum error (%x,%x)\n", htons((unsigned short) ip_hdr->ip_sum), ip_validation);
 				printf("Invalid IP Packet:%d\n", total_ip_count);
 				continue;
 			}
@@ -736,7 +780,9 @@ int main(int argc, char **argv)
 			// IP addresses are in network-byte order
 			src_ip = ip_hdr->ip_src.s_addr;
 			dst_ip = ip_hdr->ip_dst.s_addr;
-			pkt_len = ntohs(ip_hdr->ip_len);
+			pkt_len = ntohs(ip_hdr->ip_len) - (unsigned char)(ip_hdr->ip_hl << 2);
+			printf("IP LENGTH : %d\n", pkt_len);
+			total_ip_payload += pkt_len;
 
 			sprintf(ip_address_sender, "%u.%u.%u.%u", src_ip & 0xff, (src_ip >> 8) & 0xff,
 					(src_ip >> 16) & 0xff, (src_ip >> 24) & 0xff);
@@ -757,7 +803,7 @@ int main(int argc, char **argv)
 				printf("%3d |%012lf| %s-->%s |%5d|[TCP :%4d]|%05d->%05d|\n", total_ip_count,
 					   pkt_ts,
 					   ip_address_sender, ip_address_receiver,
-					   pkt_len, tcp_count, src_port, dst_port);
+					   pkt_len , tcp_count, src_port, dst_port);
 			}
 			else if (ip_hdr->ip_p == IPPROTO_UDP)
 			{
@@ -795,12 +841,13 @@ int main(int argc, char **argv)
 	HEAD_LIST_TWO = NULL;
 	//final summary
 	printf("---------------Final Statistics---------------\n");
-	printf("Total frames observed:%d\n", frame_count);
-	printf("Total IP packets observed:%d\n", total_ip_count);
-	printf("Valid IP packets observed:%d\n", valid_ip_count);
-	printf("TCP packets observed:%d\n", tcp_count);
-	printf("UDP packets observed:%d\n", udp_count);
-	printf("ICMP packets observed:%d\n", icmp_count);
+	printf("The total number of observed packets: %d\n", frame_count);
+	printf("The total number of observed IP packets: %d\n", total_ip_count);
+	printf("The total number of valid IP packets that pass the checksum test: %d\n", valid_ip_count);
+	printf("The total IP payload size (valid IP packets only): %ld\n", total_ip_payload);
+	printf("The total number of TCP packets (valid IP packets only): %d\n", tcp_count);
+	printf("The total number of UDP packets (valid IP packets only): %d\n", udp_count);
+	printf("The total number of ICMP packets (valid IP packets only): %d\n", icmp_count);
 
 	pcap_close(pcap);
 
